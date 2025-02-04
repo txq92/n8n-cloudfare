@@ -1,0 +1,74 @@
+services:
+  traefik:
+    image: "traefik:v2.10"
+    container_name: traefik
+    restart: always
+    command:
+      - "--api=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.n8n_ui.address=:8080"
+      - "--entrypoints.n8n_webhooks.address=:8081"
+    ports:
+      - "8080:8080"  # Dành cho giao diện quản trị (UI) của n8n qua Traefik
+      - "8081:8081"  # Dành cho Webhooks của n8n
+    volumes:
+      - traefik_data:/letsencrypt  # Lưu trữ chứng chỉ Let's Encrypt
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # Cho phép Traefik lấy thông tin container từ Docker
+
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data  # Lưu trữ dữ liệu của PostgreSQL
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: n8n
+    restart: always
+    labels:
+      - "traefik.enable=true"
+      # Định tuyến cho giao diện người dùng (UI)
+      - "traefik.http.routers.n8n-ui.rule=Host(`${N8N_HOST}`)"
+      - "traefik.http.routers.n8n-ui.entrypoints=n8n_ui"
+      # Định tuyến cho webhook
+      - "traefik.http.routers.n8n-webhooks.rule=Host(`${N8N_WEBHOOK}`)"
+      - "traefik.http.routers.n8n-webhooks.entrypoints=n8n_webhooks"
+    environment:
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=${N8N_PORT}
+      - N8N_PROTOCOL=${N8N_PROTOCOL}
+      - NODE_ENV=production
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      # Cấu hình xác thực cơ bản (nếu kích hoạt)
+      - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE}
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      # Cấu hình kết nối đến cơ sở dữ liệu PostgreSQL
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - n8n_data:/home/node/.n8n  # Lưu trữ dữ liệu và cấu hình của n8n
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: always
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+
+volumes:
+  traefik_data:
+  n8n_data:
+  postgres_data:
